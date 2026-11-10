@@ -1,4 +1,4 @@
-import { Check, Copy, Languages, MessageSquare } from "lucide-react";
+import { Check, Copy, Eraser, Languages, MessageSquare } from "lucide-react";
 import {
 	useCallback,
 	useEffect,
@@ -34,6 +34,16 @@ type SelectionMenuProps = {
 	onCopy: () => Promise<boolean>;
 	/** Every swatch calls this with the chosen palette key. */
 	onHighlight: (color: HighlightColor) => void;
+	/**
+	 * The stored mark this selection sits on. Absent when the selection covers
+	 * no marked area, in which case the toolbar offers no erase affordance.
+	 *
+	 * `kind` picks the label: a highlight reads "取消高亮", while an ask or
+	 * translate mark paints the same words in its own colour and reads
+	 * "取消标记" — the button must say what it is about to remove.
+	 */
+	removeTarget?: { id: string, kind: string } | undefined;
+	onRemoveMark: (id: string) => void;
 	onComment: () => void;
 	onTranslate: () => void;
 	onAsk: () => void;
@@ -123,12 +133,22 @@ export function SelectionMenu({
 	t,
 	onCopy,
 	onHighlight,
+	removeTarget,
+	onRemoveMark,
 	onComment,
 	onTranslate,
 	onAsk,
 	onDraftChange,
 	onSubmitDraft,
 }: SelectionMenuProps) {
+	// What the erase button calls the thing it would remove: a highlight has its
+	// own name, while an ask/translate mark paints the same words in another
+	// colour and should not be called a highlight.
+	const removeLabel = removeTarget === undefined
+		? ""
+		: removeTarget.kind === "highlight"
+			? t("removeHighlight")
+			: t("removeMark")
 	const showHighlight = mode === "actions";
 	const menuRef = useRef<HTMLDivElement>(null);
 	const dividerRef = useRef<HTMLDivElement>(null);
@@ -226,6 +246,25 @@ export function SelectionMenu({
 							if (!busy) onHighlight(color);
 						}}
 					/>
+					{removeTarget === undefined ? null : (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									type="button"
+									variant="ghost"
+									size="icon-sm"
+									className="size-7"
+									aria-label={removeLabel}
+									disabled={busy}
+									onPointerDown={(event) => event.preventDefault()}
+									onClick={() => onRemoveMark(removeTarget.id)}
+								>
+									<Eraser className="size-3.5" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent side="top">{removeLabel}</TooltipContent>
+						</Tooltip>
+					)}
 					<div ref={dividerRef} className="mx-0.5 h-4 w-px shrink-0 bg-border" />
 					<Tooltip>
 						<TooltipTrigger asChild>

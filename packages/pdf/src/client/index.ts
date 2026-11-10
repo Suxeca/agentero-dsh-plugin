@@ -200,6 +200,15 @@ export function apply(ctx: Context): void {
       if (!response.ok) throw new Error(errorText(parsed) ?? '')
       return translationOf(parsed)
     },
+    async deleteMark(ref, id) {
+      const params = new URLSearchParams({ ref, id })
+      const response = await request(`/agentero/api/marks?${params.toString()}`, {
+        method: 'DELETE',
+        cache: 'no-store',
+      })
+      const parsed = await parseBody(response)
+      if (!response.ok) throw new Error(errorText(parsed) ?? '')
+    },
     async saveBookmarks(ref, nodes) {
       const response = await request('/agentero/api/pdf/bookmarks', {
         method: 'POST',

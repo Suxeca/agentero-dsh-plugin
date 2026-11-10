@@ -7,6 +7,7 @@ import { type PdfPaperTone } from './page-theme'
 import { DEFAULT_HIGHLIGHT_COLOR, type HighlightColor } from './palette'
 import { PDF_FLOAT_CARD } from './pdf-chrome-surface'
 import { lastSegment, parsePaperAddress, resourceName, notesPaperPath } from './resource-path'
+import { markAtSelection, selectionRect } from './highlight-target'
 import { SelectionMenu } from './selection-menu'
 import { TranslateCard } from './translate-card'
 
@@ -59,6 +60,8 @@ export interface PdfInjected {
   loadPdf: (ref: string) => Promise<ArrayBuffer>
   loadMarks: (ref: string) => Promise<PaintMark[]>
   addMark: (body: MarkAdd) => Promise<string | undefined>
+  /** Delete one stored mark. Rejects with the host's error text on failure. */
+  deleteMark: (ref: string, id: string) => Promise<void>
   /** Vault-relative ref for a file-resource address, or an empty string outside the vault. */
   resolveAddress: (address: string) => string
   /** Send a question and citation as a new conversation turn. */
@@ -110,7 +113,7 @@ export function PdfTitle({ useTabInfo, t }: PropsRuntime<'sidebar.right.pane.tab
 }
 
 export function PdfPanel(props: PdfPanelProps): ReactNode {
-  const { t, sessionId, useTabInfo, loadPdf, loadMarks, addMark, ask, saveBookmarks, translate, loadLayout, resolveAddress } = props
+  const { t, sessionId, useTabInfo, loadPdf, loadMarks, addMark, deleteMark, ask, saveBookmarks, translate, loadLayout, resolveAddress } = props
   const navigation = useTabInfo().tab.navigation
   const paperPath = parsePaperAddress(navigation.address) ?? resolveAddress(navigation.address)
   const notesPath = notesPaperPath(paperPath)
@@ -299,6 +302,20 @@ export function PdfPanel(props: PdfPanelProps): ReactNode {
     })
   }
 
+  // A selection that sits on an existing highlight can remove it. Computed per
+  // render so it follows the current selection and the freshest marks.
+  const removeTarget = menu === undefined
+    ? undefined
+    : (() => {
+        const hit = markAtSelection(
+          marks.filter(mark => mark.page === menu.page),
+          // The selection reports `{origin, size}`; stored marks hold `{x, y, w, h}`.
+          // `pageSize` lets a normalized (`norm`) mark convert to points.
+          { page: menu.page, rects: menu.rects.map(selectionRect), pageSize: menu.pageSize },
+        )
+        return hit
+      })()
+
   const selectionMenu = menu === undefined ? null : (
     <SelectionMenu
       screen={{ x: menu.screenX, y: menu.screenY }}
@@ -324,6 +341,12 @@ export function PdfPanel(props: PdfPanelProps): ReactNode {
           rects: menu.rects,
           pageSize: menu.pageSize,
           color,
+        })
+      }}
+      removeTarget={removeTarget}
+      onRemoveMark={(markId) => {
+        void deleteMark(paperPath, markId).then(() => { refreshMarks() }).catch(() => {
+          setBanner(t('markFailed'))
         })
       }}
       onComment={() => { setMenu({ ...menu, mode: 'comment' }) }}

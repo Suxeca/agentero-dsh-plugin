@@ -9,7 +9,7 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto'
-import { lstat, mkdir, readFile, readdir, realpath, rename, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import * as path from 'node:path'
 import { locateVaultPath, within } from './notes-files.js'
 
@@ -79,6 +79,9 @@ export interface MarkWrite {
 export type MarksWriteResult =
   | { ok: true, ids: string[], path: string }
   | { ok: false, status: 400 | 404, error: string }
+
+/** Deleting one mark reports the same envelope as writing one. */
+export type MarksDeleteResult = MarksWriteResult
 
 function ioCode(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null || !('code' in error)) return undefined
@@ -312,6 +315,59 @@ async function writeAnnotations(dir: string, items: unknown[]): Promise<void> {
   const tmp = `${target}.tmp`
   await writeFile(tmp, `${JSON.stringify(items, null, 2)}\n`, 'utf8')
   await rename(tmp, target)
+}
+
+/**
+ * Delete one mark by id.
+ *
+ * Marks live in two shapes, and a delete has to handle both: highlights are
+ * entries of `marks/annotations.json` (an EmbedPDF transfer array), while
+ * ask / translate / visual marks are one `marks/<id>.json` file each.
+ *
+ * The browser names a paper by bare id (`2611.05051`), which `locateVaultPath`
+ * resolves under the vault root — a directory that does not exist for a
+ * library paper. `readMarks` already tolerates that by retrying `papers/<id>`;
+ * this does the same so the delete reaches the same paper the reader opened.
+ *
+ * @param vault - vault root
+ * @param ref - paper id or vault-relative path
+ * @param id - mark id
+ * @returns the deleted id and the file that changed, or why nothing was deleted
+ */
+export async function deleteMark(vault: string, ref: string, id: string): Promise<MarksDeleteResult> {
+  let paper = await paperDir(vault, ref)
+  if (!paper.ok && !ref.includes('/')) paper = await paperDir(vault, `papers/${ref}`)
+  if (!paper.ok) return paper
+
+  const wanted = id.trim()
+  if (wanted === '') return { ok: false, status: 400, error: 'invalid id' }
+  const dir = path.join(paper.dir.real, 'marks')
+
+  const items = await readAnnotations(dir)
+  if (items.length > 0) {
+    const kept = items.filter((item) => {
+      const record = recordOf(item)
+      const annotation = record === undefined ? undefined : (recordOf(record.annotation) ?? record)
+      return textOr(annotation?.['id']) !== wanted
+    })
+    if (kept.length !== items.length) {
+      await writeAnnotations(dir, kept)
+      return { ok: true, ids: [wanted], path: `${paper.dir.relative}/marks/${ANNOTATIONS_FILE}` }
+    }
+  }
+
+  // A per-id file must be named exactly by the id; anything else is not ours.
+  const single = path.join(dir, `${wanted}.json`)
+  if (!within(dir, single, false)) return { ok: false, status: 400, error: INVALID_PATH }
+  try {
+    const stat = await lstat(single)
+    if (!stat.isFile()) return { ok: false, status: 404, error: NOT_FOUND }
+  } catch (error) {
+    if (ioCode(error) === 'ENOENT') return { ok: false, status: 404, error: NOT_FOUND }
+    throw error
+  }
+  await rm(single)
+  return { ok: true, ids: [wanted], path: `${paper.dir.relative}/marks/${wanted}.json` }
 }
 
 /**

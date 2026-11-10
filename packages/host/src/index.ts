@@ -14,7 +14,7 @@ import {
   changeTag, deletePaper, discoverArxiv, downloadPaper, exportBib, importBib, importId, setRead,
 } from './catalog.js'
 import { listVaultNotes, locateVaultPath, readVaultFile, within, writeVaultNote } from './notes-files.js'
-import { type MarkRect, readMarks, writeMark } from './marks-store.js'
+import { deleteMark, type MarkRect, readMarks, writeMark } from './marks-store.js'
 import { bookmarkNodesFrom, writePdfBookmarks } from './bookmarks-write.js'
 import { locateVaultPdf, readVaultPdf } from './pdf-file.js'
 import { registerTools } from './tools.js'
@@ -656,13 +656,28 @@ async function handleMarks(
   children: Set<ChildProcess>,
   translate: TranslateText,
 ): Promise<void> {
-  if (req.method !== 'GET' && req.method !== 'POST') {
+  if (req.method !== 'GET' && req.method !== 'POST' && req.method !== 'DELETE') {
     res.statusCode = 405
-    res.setHeader('allow', 'GET, POST')
+    res.setHeader('allow', 'GET, POST, DELETE')
     res.end()
     return
   }
   if (!requireVault(settings, res)) return
+  if (req.method === 'DELETE') {
+    const ref = queryParam(req, 'ref')
+    const id = queryParam(req, 'id')
+    if (ref === null || ref.trim() === '' || id === null || id.trim() === '') {
+      sendJson(res, 400, { error: 'invalid path' })
+      return
+    }
+    const removed = await deleteMark(settings.vault, ref.trim(), id.trim())
+    if (!removed.ok) {
+      sendJson(res, removed.status, { error: removed.error })
+      return
+    }
+    sendJson(res, 200, { ok: true, ids: removed.ids, path: removed.path })
+    return
+  }
   if (req.method === 'GET') {
     const ref = queryParam(req, 'ref')
     if (ref === null || ref.trim() === '') {
